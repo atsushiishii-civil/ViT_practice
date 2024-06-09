@@ -31,15 +31,15 @@ class ViT(nn.Module):
                  patch_size = 16,
                  embedding_dim = 384,
                  num_heads = 3,
-                 num_layers = 12,
-                 hidden_dim = 768,
+                 num_encoder_layer = 12,
+                 hidden_dim = 384*4,
                  num_classes = 1000,
                  dropout = 0.1):
         super(ViT,self).__init__()
         self.input_layer = ViT_input_Layer(in_channels, image_size, patch_size, embedding_dim, dropout)
         self.encoder_layer = nn.Sequential(*[
-            Encoder_Block(num_heads, embedding_dim, dropout)
-            for _ in range(num_layers)
+            Encoder_Block(num_heads, embedding_dim, hidden_dim,dropout)
+            for _ in range(num_encoder_layer)
         ])
         ## 最後にMLP
         ## (B,D) -> (B,num_classes)
@@ -136,7 +136,7 @@ class Self_Attention_Layer(nn.Module):
     ## this layer is responsible for the self-attention mechanism
     ## it employs multi-head attention, which is a technique to allow the model to attend to different representation subspaces
     ## in the self-attention mechanism, the model learns to attend to different representation subspaces
-    def __init__(self, num_heads = 3, embedding_dim = 384):
+    def __init__(self, num_heads = 3, embedding_dim = 384, dropout = 0):
         super(Self_Attention_Layer,self).__init__()
         self.num_heads = num_heads
         self.embedding_dim = embedding_dim
@@ -150,7 +150,7 @@ class Self_Attention_Layer(nn.Module):
         self.softmax = torch.nn.Softmax(dim=-1)
         # 3. Attention drop layer
         self.attn_drop = nn.Dropout(0)
-        # 3. Create the output linear layer
+        # 4. Create the output linear layer
         self.output_linear = torch.nn.Linear(embedding_dim, embedding_dim)
     def forward(self, z):
         ## z.shape = (batch_size, num_patches + 1, embedding_dim) = (2,5,384)
@@ -194,7 +194,9 @@ class Self_Attention_Layer(nn.Module):
         ## より多くの情報を得るためhead数を増やす
         dot_k_q = (q@k_T)/self.sqrt_dh
         ## 行方向にsoftmaxを適用 
-        attn = F.softmax(dot_k_q, dim=-1)
+        ##attn = F.softmax(dot_k_q, dim=-1)
+        attn = self.softmax(dot_k_q) 
+        attn = self.attn_drop(attn) ## Attention weight算出後にdropout
         ###################################################################
         ## 4. Valueの重み付け ################################################
         ###################################################################
@@ -224,12 +226,15 @@ class Encoder_Block(nn.Module):
     ## 4. LayerNorm
     ## 5. MLP
     ## 6. Addition (Skip connection)
-    def __init__(self, num_heads = 3, embedding_dim = 384,dropout = 0.1):
+    def __init__(self,
+                 num_heads = 8,
+                 embedding_dim = 384,
+                 hidden_dim = 384*4,
+                 dropout = 0):
         super(Encoder_Block,self).__init__()
         self.num_heads = num_heads
         self.embedding_dim = embedding_dim
         self.head_dim = embedding_dim // num_heads
-        self.hidden_dim = embedding_dim * 4
         ###################################################################
         ## 1. LayerNorm ###################################################
         ###################################################################
@@ -237,17 +242,17 @@ class Encoder_Block(nn.Module):
         ###################################################################
         ## 2. Multi-head attention ########################################
         ###################################################################
-        self.multi_head_attention = Self_Attention_Layer(num_heads, embedding_dim)
+        self.multi_head_attention = Self_Attention_Layer(num_heads, embedding_dim, dropout= dropout)
         ###################################################################
         ## 3. Second LayerNorm ##############################################
         ###################################################################
         self.layer_norm_2 = nn.LayerNorm(embedding_dim)
         ## 4. MLP ##############################################################
         self.mlp = nn.Sequential(
-            nn.Linear(embedding_dim, self.hidden_dim),
+            nn.Linear(embedding_dim, hidden_dim),
             nn.GELU(),
             nn.Dropout(dropout),
-            nn.Linear(self.hidden_dim, embedding_dim),
+            nn.Linear(hidden_dim, embedding_dim),
             nn.Dropout(dropout)
         )
 
